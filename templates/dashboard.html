@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Intrusion Detection Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        #video-container { position: relative; }
+        #video-feed { width: 100%; max-width: 800px; border: 2px solid #333; cursor: crosshair; }
+        #roi-canvas { position: absolute; left: 0; top: 0; z-index: 10; pointer-events: none; }
+        .event-log { max-height: 300px; overflow-y: auto; }
+        .snapshot-container { max-height: 400px; overflow-y: auto; }
+        .snapshot-item { cursor: pointer; transition: transform 0.2s; }
+        .snapshot-item:hover { transform: scale(1.05); }
+        .settings-panel { background-color: #f8f9fa; border-radius: 5px; padding: 15px; }
+        .drawing-active #video-feed { cursor: crosshair; }
+        .tab-content { padding: 15px 0; }
+        .date-filter { margin-bottom: 15px; }
+    </style>
+</head>
+<body class="bg-light">
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <div class="container">
+        <a class="navbar-brand" href="/">Intrusion Detection System</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link active" href="/">Dashboard</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/logs">Logs</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/video-analytics">
+                        <i class="fas fa-chart-line me-1"></i>Video Analytics
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <h2 class="mb-3 text-center">Intrusion Detection Dashboard</h2>
+    
+    <ul class="nav nav-tabs mb-3" id="mainTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="live-tab" data-bs-toggle="tab" data-bs-target="#live" type="button" role="tab">Live Monitoring</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="intrusions-tab" data-bs-toggle="tab" data-bs-target="#intrusions" type="button" role="tab">Intrusion Images</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="recordings-tab" data-bs-toggle="tab" data-bs-target="#recordings" type="button" role="tab">Recordings</button>
+        </li>
+    </ul>
+    
+    <div class="tab-content" id="mainTabsContent">
+        <div class="tab-pane fade show active" id="live" role="tabpanel">
+            <div class="row">
+                <!-- Left Column - Video and Controls -->
+                <div class="col-lg-8">
+            <div class="card mb-3">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Live Video Feed</h5>
+                </div>
+                <div class="card-body">
+                    <div id="video-container">
+                        <img id="video-feed" src="/video_feed" alt="Video Feed">
+                        <canvas id="roi-canvas"></canvas>
+                    </div>
+                    
+                    <div class="mt-3 d-flex justify-content-between">
+                        <div>
+                            <button class="btn btn-outline-primary btn-sm" id="toggle-detection">Start Detection</button>
+                            <button class="btn btn-outline-danger btn-sm" id="toggle-recording">Start Recording</button>
+                        </div>
+                        <div>
+                            <button class="btn btn-outline-secondary btn-sm" id="clear-roi">Clear ROI</button>
+                            <button class="btn btn-outline-success btn-sm" id="save-roi">Save ROI</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card mb-3">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Video Source Selection</h5>
+                </div>
+                <div class="card-body">
+                    <form id="source-form" class="row g-3">
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="source_type" id="src-webcam" value="webcam" checked>
+                                <label class="form-check-label" for="src-webcam">Webcam</label>
+                            </div>
+                            <select class="form-select mt-2" id="camera-select" style="display:block;">
+                                <option value="0">Default Camera</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="source_type" id="src-rtsp" value="rtsp">
+                                <label class="form-check-label" for="src-rtsp">RTSP Stream</label>
+                            </div>
+                            <input type="text" class="form-control mt-2" id="rtsp-url" placeholder="rtsp://username:password@ip:port/stream" style="display:none;">
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="source_type" id="src-file" value="file">
+                                <label class="form-check-label" for="src-file">Video File</label>
+                            </div>
+                            <input type="file" class="form-control mt-2" id="video-file" accept=".mp4,.avi,.mov" style="display:none;">
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-primary">Connect</button>
+                            <span id="conn-status" class="badge bg-secondary ms-2">Not Connected</span>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <div class="card mb-3">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Detection Settings</h5>
+                </div>
+                <div class="card-body">
+                    <form id="settings-form" class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Motion Threshold</label>
+                            <input type="range" class="form-range" id="motion-threshold" min="5" max="50" step="1">
+                            <div class="text-center"><span id="motion-threshold-value">25</span></div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Min Object Area</label>
+                            <input type="range" class="form-range" id="min-area" min="50" max="1000" step="10">
+                            <div class="text-center"><span id="min-area-value">300</span></div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Min Speed</label>
+                            <input type="range" class="form-range" id="min-speed" min="1" max="20" step="0.5">
+                            <div class="text-center"><span id="min-speed-value">2</span></div>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-primary">Save Settings</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Right Column - Snapshots and Recordings (Event Notifications removed, Snapshots shifted up) -->
+        <div class="col-lg-4">
+            <div class="card mb-3">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">Snapshots</h5>
+                </div>
+                <div class="card-body">
+                    <div class="snapshot-container" id="snapshots-container">
+                        <div class="text-center text-muted">No snapshots available</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card mb-3">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0">Recordings</h5>
+                </div>
+                <div class="card-body">
+                    <div id="recordings-container">
+                        <div class="text-center text-muted">No recordings available</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Intrusion Images Tab -->
+        <div class="tab-pane fade" id="intrusions" role="tabpanel">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Intrusion Images by Date</h5>
+                </div>
+                <div class="card-body">
+                    <div class="date-filter">
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label for="date-filter">Filter by Date:</label>
+                                <input type="date" id="date-filter" class="form-control" value="">
+                            </div>
+                            <div class="col-md-4 d-flex align-items-end">
+                                <button id="apply-date-filter" class="btn btn-primary me-2">Apply Filter</button>
+                                <button id="clear-date-filter" class="btn btn-secondary">Clear Filter</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="filtered-snapshots" class="row snapshot-container">
+                        <!-- Filtered snapshots will be populated here -->
+                        <div class="col-12 text-center py-3" id="no-snapshots-message" style="display: none;">
+                            <p class="text-muted">No intrusion images found for the selected date.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Recordings Tab -->
+        <div class="tab-pane fade" id="recordings" role="tabpanel">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Recorded Videos</h5>
+                </div>
+                <div class="card-body">
+                    <div class="date-filter">
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label for="recording-date-filter">Filter by Date:</label>
+                                <input type="date" id="recording-date-filter" class="form-control" value="">
+                            </div>
+                            <div class="col-md-4 d-flex align-items-end">
+                                <button id="apply-recording-filter" class="btn btn-primary me-2">Apply Filter</button>
+                                <button id="clear-recording-filter" class="btn btn-secondary">Clear Filter</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="filtered-recordings" class="row">
+                        <!-- Filtered recordings will be populated here -->
+                        <div class="col-12 text-center py-3" id="no-recordings-message" style="display: none;">
+                            <p class="text-muted">No recordings found for the selected date.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for viewing snapshots -->
+<div class="modal fade" id="snapshot-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Event Snapshot</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center">
+                <img id="snapshot-image" class="img-fluid" src="" alt="Event Snapshot">
+                <p id="snapshot-timestamp" class="mt-2"></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// Global variables
+let roi = [];
+let drawing = false;
+let detectionActive = false;
+let recordingActive = false;
+let snapshotModal;
+
+// DOM elements
+const videoFeed = document.getElementById('video-feed');
+const roiCanvas = document.getElementById('roi-canvas');
+const ctx = roiCanvas.getContext('2d');
+const toggleDetectionBtn = document.getElementById('toggle-detection');
+const toggleRecordingBtn = document.getElementById('toggle-recording');
+const clearRoiBtn = document.getElementById('clear-roi');
+const saveRoiBtn = document.getElementById('save-roi');
+const sourceForm = document.getElementById('source-form');
+const settingsForm = document.getElementById('settings-form');
+const eventLog = document.getElementById('event-log');
+const eventNotify = document.getElementById('event-notify');
+const snapshotsContainer = document.getElementById('snapshots-container');
+const recordingsContainer = document.getElementById('recordings-container');
+
+// Initialize canvas size
+function resizeCanvas() {
+    roiCanvas.width = videoFeed.clientWidth;
+    roiCanvas.height = videoFeed.clientHeight;
+    drawROI();
+}
+
+// Draw ROI on canvas with improved visibility
+function drawROI() {
+    ctx.clearRect(0, 0, roiCanvas.width, roiCanvas.height);
+    if (roi.length > 0) {
+        // Draw lines connecting points
+        ctx.beginPath();
+        ctx.moveTo(roi[0][0], roi[0][1]);
+        for (let i = 1; i < roi.length; i++) {
+            ctx.lineTo(roi[i][0], roi[i][1]);
+        }
+        
+        // Close the polygon if we have at least 3 points and not in drawing mode
+        if (roi.length >= 3 && !drawing) {
+            ctx.closePath();
+        }
+        
+        // Draw semi-transparent fill for completed ROI
+        if (roi.length >= 3 && !drawing) {
+            ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+            ctx.fill();
+        }
+        
+        // Draw outline
+        ctx.strokeStyle = 'rgba(0, 255, 0, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // Draw points with numbers
+        for (let i = 0; i < roi.length; i++) {
+            const pt = roi[i];
+            // Outer circle (white border)
+            ctx.beginPath();
+            ctx.arc(pt[0], pt[1], 6, 0, 2 * Math.PI);
+            ctx.fillStyle = 'white';
+            ctx.fill();
+            
+            // Inner circle (green fill)
+            ctx.beginPath();
+            ctx.arc(pt[0], pt[1], 4, 0, 2 * Math.PI);
+            ctx.fillStyle = 'green';
+            ctx.fill();
+            
+            // Point number
+            ctx.font = '10px Arial';
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText((i + 1).toString(), pt[0], pt[1]);
+        }
+        
+        // Draw instruction text if in drawing mode
+        if (drawing) {
+            ctx.font = '14px Arial';
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'center';
+            ctx.fillText('Click to add points, double-click to complete, right-click to cancel', roiCanvas.width / 2, 20);
+        }
+    }
+}
+
+// Initialize the page
+window.onload = function() {
+    // Initialize modal
+    snapshotModal = new bootstrap.Modal(document.getElementById('snapshot-modal'));
+    
+    // Set up canvas
+    videoFeed.onload = resizeCanvas;
+    window.onresize = resizeCanvas;
+    resizeCanvas();
+    
+    // Load ROI
+    fetch('/api/set_roi')
+        .then(response => response.json())
+        .then(data => {
+            if (data.points && data.points.length > 0) {
+                roi = data.points;
+                drawROI();
+            }
+        });
+    
+    // Load settings
+    fetch('/api/get_settings')
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('motion-threshold').value = data.motion_threshold;
+            document.getElementById('motion-threshold-value').textContent = data.motion_threshold;
+            document.getElementById('min-area').value = data.min_area;
+            document.getElementById('min-area-value').textContent = data.min_area;
+            document.getElementById('min-speed').value = data.min_speed;
+            document.getElementById('min-speed-value').textContent = data.min_speed;
+        });
+    
+    // Load available cameras
+    fetch('/api/get_available_cameras')
+        .then(response => response.json())
+        .then(data => {
+            const cameraSelect = document.getElementById('camera-select');
+            cameraSelect.innerHTML = '';
+            if (data.cameras.length === 0) {
+                cameraSelect.innerHTML = '<option value="0">No cameras found</option>';
+            } else {
+                data.cameras.forEach((camera, index) => {
+                    const option = document.createElement('option');
+                    option.value = camera;
+                    option.textContent = `Camera ${camera}`;
+                    cameraSelect.appendChild(option);
+                });
+            }
+        });
+    
+    // Load events
+    loadEvents();
+    
+    // Load snapshots
+    loadSnapshots();
+    
+    // Load recordings
+    loadRecordings();
+};
+
+// ROI drawing - improved with better user interaction
+videoFeed.addEventListener('click', function(e) {
+    const rect = roiCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    if (!drawing) {
+        roi = [];
+        drawing = true;
+    }
+    
+    roi.push([Math.round(x), Math.round(y)]);
+    drawROI();
+});
+
+videoFeed.addEventListener('dblclick', function() {
+    if (drawing && roi.length > 2) {
+        drawing = false;
+        saveROI();
+    }
+});
+
+// Allow canceling ROI drawing with right-click
+videoFeed.addEventListener('contextmenu', function(e) {
+    e.preventDefault();
+    if (drawing) {
+        roi = [];
+        drawing = false;
+        drawROI();
+    }
+    return false;
+});
+
+// Button handlers
+clearRoiBtn.addEventListener('click', function() {
+    roi = [];
+    drawROI();
+});
+
+saveRoiBtn.addEventListener('click', saveROI);
+
+function saveROI() {
+    fetch('/api/set_roi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ points: roi })
+    });
+}
+
+// Toggle detection
+toggleDetectionBtn.addEventListener('click', function() {
+    detectionActive = !detectionActive;
+    fetch('/api/toggle_detection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: detectionActive })
+    });
+    
+    if (detectionActive) {
+        toggleDetectionBtn.textContent = 'Stop Detection';
+        toggleDetectionBtn.classList.replace('btn-outline-primary', 'btn-primary');
+    } else {
+        toggleDetectionBtn.textContent = 'Start Detection';
+        toggleDetectionBtn.classList.replace('btn-primary', 'btn-outline-primary');
+    }
+});
+
+// Toggle recording
+toggleRecordingBtn.addEventListener('click', function() {
+    recordingActive = !recordingActive;
+    fetch('/api/toggle_recording', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recording: recordingActive })
+    });
+    
+    if (recordingActive) {
+        toggleRecordingBtn.textContent = 'Stop Recording';
+        toggleRecordingBtn.classList.replace('btn-outline-danger', 'btn-danger');
+    } else {
+        toggleRecordingBtn.textContent = 'Start Recording';
+        toggleRecordingBtn.classList.replace('btn-danger', 'btn-outline-danger');
+        // Reload recordings after stopping
+        setTimeout(loadRecordings, 1000);
+    }
+});
+
+// Source selection
+function updateSourceUI() {
+    const sourceType = document.querySelector('input[name="source_type"]:checked').value;
+    document.getElementById('camera-select').style.display = (sourceType === 'webcam') ? 'block' : 'none';
+    document.getElementById('rtsp-url').style.display = (sourceType === 'rtsp') ? 'block' : 'none';
+    document.getElementById('video-file').style.display = (sourceType === 'file') ? 'block' : 'none';
+}
+
+document.querySelectorAll('input[name="source_type"]').forEach(radio => {
+    radio.addEventListener('change', updateSourceUI);
+});
+
+updateSourceUI();
+
+// Source form submission
+sourceForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+    const sourceType = document.querySelector('input[name="source_type"]:checked').value;
+    const connStatus = document.getElementById('conn-status');
+    
+    connStatus.textContent = 'Connecting...';
+    connStatus.className = 'badge bg-warning ms-2';
+    
+    if (sourceType === 'webcam') {
+        const cameraId = document.getElementById('camera-select').value;
+        fetch('/api/set_source', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_type: 'webcam', camera_id: cameraId })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                connStatus.textContent = 'Connected';
+                connStatus.className = 'badge bg-success ms-2';
+            } else {
+                connStatus.textContent = 'Connection Failed';
+                connStatus.className = 'badge bg-danger ms-2';
+            }
+        });
+    } else if (sourceType === 'rtsp') {
+        const rtspUrl = document.getElementById('rtsp-url').value;
+        fetch('/api/set_source', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_type: 'rtsp', rtsp_url: rtspUrl })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                connStatus.textContent = 'Connected';
+                connStatus.className = 'badge bg-success ms-2';
+            } else {
+                connStatus.textContent = 'Connection Failed';
+                connStatus.className = 'badge bg-danger ms-2';
+            }
+        });
+    } else if (sourceType === 'file') {
+        const fileInput = document.getElementById('video-file');
+        if (fileInput.files.length === 0) {
+            connStatus.textContent = 'No File Selected';
+            connStatus.className = 'badge bg-danger ms-2';
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('video', fileInput.files[0]);
+        
+        fetch('/api/upload_video', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                connStatus.textContent = 'File Loaded';
+                connStatus.className = 'badge bg-success ms-2';
+            } else {
+                connStatus.textContent = 'Upload Failed';
+                connStatus.className = 'badge bg-danger ms-2';
+            }
+        });
+    }
+});
+
+// Settings form
+document.getElementById('motion-threshold').addEventListener('input', function() {
+    document.getElementById('motion-threshold-value').textContent = this.value;
+});
+
+document.getElementById('min-area').addEventListener('input', function() {
+    document.getElementById('min-area-value').textContent = this.value;
+});
+
+document.getElementById('min-speed').addEventListener('input', function() {
+    document.getElementById('min-speed-value').textContent = this.value;
+});
+
+settingsForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+    const settings = {
+        motion_threshold: parseInt(document.getElementById('motion-threshold').value),
+        min_area: parseInt(document.getElementById('min-area').value),
+        min_speed: parseFloat(document.getElementById('min-speed').value)
+    };
+    
+    fetch('/api/update_settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            alert('Settings updated successfully');
+        }
+    });
+});
+
+// Load events
+function loadEvents() {
+    fetch('/api/get_events')
+        .then(response => response.json())
+        .then(data => {
+            if (data.events.length > 0) {
+                eventLog.innerHTML = '';
+                data.events.slice(0, 10).forEach(event => {
+                    const eventItem = document.createElement('div');
+                    eventItem.className = 'border-bottom py-1';
+                    eventItem.innerHTML = `
+                        <div><strong>${event.timestamp}</strong></div>
+                        <div>Speed: ${event.speed.toFixed(1)} | Direction: ${event.direction || 'N/A'}</div>
+                    `;
+                    eventLog.appendChild(eventItem);
+                });
+                
+                // Show latest event notification
+                const latestEvent = data.events[0];
+                eventNotify.innerHTML = `
+                    <strong>ALERT!</strong> Motion detected<br>
+                    Speed: ${latestEvent.speed.toFixed(1)} | Time: ${latestEvent.timestamp}
+                `;
+                eventNotify.style.display = 'block';
+                setTimeout(() => { eventNotify.style.display = 'none'; }, 5000);
+            }
+        });
+}
+
+// Load snapshots
+function loadSnapshots() {
+    fetch('/api/get_snapshots')
+        .then(response => response.json())
+        .then(data => {
+            if (data.snapshots.length > 0) {
+                snapshotsContainer.innerHTML = '';
+                const row = document.createElement('div');
+                row.className = 'row g-2';
+                
+                data.snapshots.slice(0, 8).forEach(snapshot => {
+                    const col = document.createElement('div');
+                    col.className = 'col-6';
+                    col.innerHTML = `
+                        <div class="snapshot-item card h-100">
+                            <img src="${snapshot.url}" class="card-img-top" alt="Event Snapshot">
+                            <div class="card-body p-1">
+                                <small class="text-muted">${snapshot.timestamp}</small>
+                            </div>
+                        </div>
+                    `;
+                    
+                    col.querySelector('.snapshot-item').addEventListener('click', () => {
+                        document.getElementById('snapshot-image').src = snapshot.url;
+                        document.getElementById('snapshot-timestamp').textContent = snapshot.timestamp;
+                        snapshotModal.show();
+                    });
+                    
+                    row.appendChild(col);
+                });
+                
+                snapshotsContainer.appendChild(row);
+            }
+        });
+}
+
+// Load recordings
+function loadRecordings() {
+    fetch('/api/get_recordings')
+        .then(response => response.json())
+        .then(data => {
+            if (data.recordings.length > 0) {
+                recordingsContainer.innerHTML = '';
+                const list = document.createElement('ul');
+                list.className = 'list-group';
+                
+                data.recordings.forEach(recording => {
+                    const item = document.createElement('li');
+                    item.className = 'list-group-item d-flex justify-content-between align-items-center';
+                    item.innerHTML = `
+                        <div>
+                            <div>${recording.timestamp}</div>
+                            <small class="text-muted">${recording.size.toFixed(2)} MB</small>
+                        </div>
+                        <a href="${recording.url}" class="btn btn-sm btn-outline-primary" download>Download</a>
+                    `;
+                    list.appendChild(item);
+                });
+                
+                recordingsContainer.appendChild(list);
+            }
+        });
+}
+
+// Date filtering functions for intrusion images
+function formatDateForFilter(dateStr) {
+    return dateStr.split('T')[0]; // Extract YYYY-MM-DD part
+}
+
+function filterSnapshotsByDate(date) {
+    const filteredContainer = document.getElementById('filtered-snapshots');
+    const noSnapshotsMessage = document.getElementById('no-snapshots-message');
+    
+    // Clear previous content
+    filteredContainer.innerHTML = '';
+    noSnapshotsMessage.style.display = 'none';
+    
+    fetch('/api/get_snapshots')
+        .then(response => response.json())
+        .then(data => {
+            // Handle both formats: {snapshots: [...]} or directly [...]
+            const snapshots = data.snapshots || data;
+            
+            const filteredSnapshots = date ? 
+                snapshots.filter(snapshot => formatDateForFilter(snapshot.timestamp) === date) : 
+                snapshots;
+            
+            if (filteredSnapshots.length === 0) {
+                noSnapshotsMessage.style.display = 'block';
+                return;
+            }
+            
+            filteredSnapshots.forEach(snapshot => {
+                const col = document.createElement('div');
+                col.className = 'col-md-4 mb-3';
+                
+                const card = document.createElement('div');
+                card.className = 'card snapshot-item';
+                card.onclick = function() {
+                    document.getElementById('modal-snapshot').src = snapshot.url;
+                    document.getElementById('modal-timestamp').textContent = 'Timestamp: ' + snapshot.timestamp;
+                    const snapshotModal = new bootstrap.Modal(document.getElementById('snapshotModal'));
+                    snapshotModal.show();
+                };
+                
+                const img = document.createElement('img');
+                img.className = 'card-img-top';
+                img.src = snapshot.url;
+                img.alt = 'Intrusion Snapshot';
+                
+                const cardBody = document.createElement('div');
+                cardBody.className = 'card-body';
+                
+                const timestamp = document.createElement('p');
+                timestamp.className = 'card-text small';
+                timestamp.textContent = snapshot.timestamp;
+                
+                cardBody.appendChild(timestamp);
+                card.appendChild(img);
+                card.appendChild(cardBody);
+                col.appendChild(card);
+                filteredContainer.appendChild(col);
+            });
+        })
+        .catch(error => console.error('Error loading snapshots:', error));
+}
+
+// Date filtering functions for recordings
+function filterRecordingsByDate(date) {
+    const filteredContainer = document.getElementById('filtered-recordings');
+    const noRecordingsMessage = document.getElementById('no-recordings-message');
+    
+    // Clear previous content
+    filteredContainer.innerHTML = '';
+    noRecordingsMessage.style.display = 'none';
+    
+    fetch('/api/get_recordings')
+        .then(response => response.json())
+        .then(data => {
+            // Handle both formats: {recordings: [...]} or directly [...]
+            const recordings = data.recordings || data;
+            
+            const filteredRecordings = date ? 
+                recordings.filter(recording => formatDateForFilter(recording.timestamp) === date) : 
+                recordings;
+            
+            if (filteredRecordings.length === 0) {
+                noRecordingsMessage.style.display = 'block';
+                return;
+            }
+            
+            filteredRecordings.forEach(recording => {
+                const col = document.createElement('div');
+                col.className = 'col-md-6 mb-3';
+                
+                const card = document.createElement('div');
+                card.className = 'card';
+                
+                const cardBody = document.createElement('div');
+                cardBody.className = 'card-body';
+                
+                const title = document.createElement('h5');
+                title.className = 'card-title';
+                title.textContent = recording.filename || recording.timestamp;
+                
+                const timestamp = document.createElement('p');
+                timestamp.className = 'card-text';
+                timestamp.textContent = 'Recorded: ' + recording.timestamp;
+                
+                const size = document.createElement('p');
+                size.className = 'card-text';
+                // Handle size formatting - might be a string or number
+                const sizeText = typeof recording.size === 'number' ? 
+                    recording.size.toFixed(2) + ' MB' : recording.size;
+                size.textContent = 'Size: ' + sizeText;
+                
+                const link = document.createElement('a');
+                link.href = recording.url;
+                link.className = 'btn btn-primary';
+                link.textContent = 'Download';
+                link.download = recording.filename || '';
+                
+                cardBody.appendChild(title);
+                cardBody.appendChild(timestamp);
+                cardBody.appendChild(size);
+                cardBody.appendChild(link);
+                card.appendChild(cardBody);
+                col.appendChild(card);
+                filteredContainer.appendChild(col);
+            });
+        })
+        .catch(error => console.error('Error loading recordings:', error));
+}
+
+// Event listeners for date filters
+document.getElementById('apply-date-filter').addEventListener('click', function() {
+    const dateFilter = document.getElementById('date-filter').value;
+    filterSnapshotsByDate(dateFilter);
+});
+
+document.getElementById('clear-date-filter').addEventListener('click', function() {
+    document.getElementById('date-filter').value = '';
+    filterSnapshotsByDate(null);
+});
+
+document.getElementById('apply-recording-filter').addEventListener('click', function() {
+    const dateFilter = document.getElementById('recording-date-filter').value;
+    filterRecordingsByDate(dateFilter);
+});
+
+document.getElementById('clear-recording-filter').addEventListener('click', function() {
+    document.getElementById('recording-date-filter').value = '';
+    filterRecordingsByDate(null);
+});
+
+// Tab change event listeners for Bootstrap 5
+const intrusionsTab = document.getElementById('intrusions-tab');
+const recordingsTab = document.getElementById('recordings-tab');
+
+intrusionsTab.addEventListener('shown.bs.tab', function() {
+    filterSnapshotsByDate(document.getElementById('date-filter').value);
+});
+
+recordingsTab.addEventListener('shown.bs.tab', function() {
+    filterRecordingsByDate(document.getElementById('recording-date-filter').value);
+});
+
+// Also trigger on click for better responsiveness
+intrusionsTab.addEventListener('click', function() {
+    setTimeout(() => filterSnapshotsByDate(document.getElementById('date-filter').value), 100);
+});
+
+recordingsTab.addEventListener('click', function() {
+    setTimeout(() => filterRecordingsByDate(document.getElementById('recording-date-filter').value), 100);
+});
+
+// Set today's date as default for date filters
+const today = new Date().toISOString().split('T')[0];
+document.getElementById('date-filter').value = today;
+document.getElementById('recording-date-filter').value = today;
+
+// Periodically refresh data
+setInterval(loadEvents, 5000);
+setInterval(loadSnapshots, 10000);
+setInterval(loadRecordings, 30000);
+</script>
+</body>
+</html>

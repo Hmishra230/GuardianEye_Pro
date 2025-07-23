@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Critical Region Detection - Live</title>
+    {{ bootstrap|safe }}
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        #video-canvas { width: 100%; max-width: 640px; border: 2px solid #333; }
+        #roi-canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
+        .event-log { max-height: 200px; overflow-y: auto; }
+    </style>
+</head>
+<body class="bg-light">
+<div class="container py-3">
+    <h2 class="mb-3">Critical Region Detection - Live</h2>
+    <div class="card mb-3 p-3">
+        <h5>Video Source Selection</h5>
+        <form id="source-form" class="row g-2 align-items-center">
+            <div class="col-auto">
+                <input type="radio" name="source_type" id="src-webcam" value="webcam" checked>
+                <label for="src-webcam">Webcam</label>
+            </div>
+            <div class="col-auto">
+                <input type="radio" name="source_type" id="src-rtsp" value="rtsp">
+                <label for="src-rtsp">RTSP Stream</label>
+            </div>
+            <div class="col-auto">
+                <input type="radio" name="source_type" id="src-file" value="file">
+                <label for="src-file">Video File</label>
+            </div>
+            <div class="w-100"></div>
+            <div class="col-12 col-md-6" id="rtsp-group" style="display:none;">
+                <input type="text" class="form-control" id="rtsp-url" placeholder="rtsp://username:password@ip:port/stream">
+            </div>
+            <div class="col-12 col-md-6" id="file-group" style="display:none;">
+                <input type="file" class="form-control" id="video-file" accept=".mp4,.avi,.mov,.mkv,.flv">
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary">Connect/Start</button>
+            </div>
+            <div class="col-auto">
+                <span id="conn-status" class="badge bg-secondary">Status: Unknown</span>
+            </div>
+        </form>
+    </div>
+    <div class="row">
+        <div class="col-12 col-md-8">
+            <div style="position:relative;">
+                <img id="video" src="/video_feed" style="width:100%;max-width:640px;"/>
+                <canvas id="roi-canvas" style="position:absolute;top:0;left:0;"></canvas>
+            </div>
+            <div class="mt-2">
+                <button class="btn btn-primary btn-sm" id="clear-roi">Clear ROI</button>
+                <button class="btn btn-success btn-sm" id="save-roi">Save ROI</button>
+                <a href="/settings" class="btn btn-secondary btn-sm">Settings</a>
+            </div>
+        </div>
+        <div class="col-12 col-md-4">
+            <h5>Event Notifications</h5>
+            <div id="event-notify" class="alert alert-info" style="display:none;"></div>
+            <h5>Event History</h5>
+            <div class="event-log border p-2 bg-white" id="event-log"></div>
+        </div>
+    </div>
+</div>
+<script>
+const socket = io();
+let roi = [];
+let drawing = false;
+let canvas = document.getElementById('roi-canvas');
+let video = document.getElementById('video');
+let ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+    canvas.width = video.width;
+    canvas.height = video.height;
+    drawROI();
+}
+video.onload = resizeCanvas;
+window.onresize = resizeCanvas;
+
+function drawROI() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (roi.length > 0) {
+        ctx.beginPath();
+        ctx.moveTo(roi[0][0], roi[0][1]);
+        for (let i = 1; i < roi.length; i++) ctx.lineTo(roi[i][0], roi[i][1]);
+        ctx.closePath();
+        ctx.strokeStyle = 'green';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        for (let pt of roi) {
+            ctx.beginPath();
+            ctx.arc(pt[0], pt[1], 4, 0, 2 * Math.PI);
+            ctx.fillStyle = 'green';
+            ctx.fill();
+        }
+    }
+}
+
+canvas.addEventListener('mousedown', function(e) {
+    if (!drawing) {
+        roi = [];
+        drawing = true;
+    }
+    let rect = canvas.getBoundingClientRect();
+    let x = e.clientX - rect.left;
+    let y = e.clientY - rect.top;
+    roi.push([Math.round(x), Math.round(y)]);
+    drawROI();
+});
+canvas.addEventListener('dblclick', function(e) {
+    if (drawing && roi.length > 2) {
+        drawing = false;
+        fetch('/set_roi', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ roi: roi })
+        });
+    }
+});
+document.getElementById('clear-roi').onclick = function() {
+    roi = [];
+    drawROI();
+    fetch('/set_roi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roi: [] }) });
+};
+document.getElementById('save-roi').onclick = function() {
+    fetch('/set_roi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roi: roi }) });
+};
+
+function updateEventLog(events) {
+    let log = document.getElementById('event-log');
+    log.innerHTML = '';
+    for (let ev of events.reverse()) {
+        log.innerHTML += `<div><b>${ev.time}</b> - Speed: ${ev.speed.toFixed(1)} px/frame</div>`;
+    }
+}
+
+socket.on('event_notification', function(ev) {
+    let notify = document.getElementById('event-notify');
+    notify.innerHTML = `ALERT! Speed: ${ev.speed.toFixed(1)} px/frame`;
+    notify.style.display = 'block';
+    setTimeout(() => { notify.style.display = 'none'; }, 4000);
+    fetch('/event_history').then(r => r.json()).then(data => updateEventLog(data.events));
+});
+
+function updateSourceUI() {
+    let stype = document.querySelector('input[name="source_type"]:checked').value;
+    document.getElementById('rtsp-group').style.display = (stype === 'rtsp') ? '' : 'none';
+    document.getElementById('file-group').style.display = (stype === 'file') ? '' : 'none';
+}
+for (let el of document.querySelectorAll('input[name="source_type"]')) {
+    el.onchange = updateSourceUI;
+}
+updateSourceUI();
+
+document.getElementById('source-form').onsubmit = function(e) {
+    e.preventDefault();
+    let stype = document.querySelector('input[name="source_type"]:checked').value;
+    let data = { source_type: stype };
+    if (stype === 'rtsp') {
+        data.rtsp_url = document.getElementById('rtsp-url').value;
+        fetch('/set_source', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        }).then(() => updateConnStatus());
+    } else if (stype === 'file') {
+        let fileInput = document.getElementById('video-file');
+        if (fileInput.files.length === 0) return;
+        let formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        fetch('/upload_video', {
+            method: 'POST',
+            body: formData
+        }).then(() => updateConnStatus());
+    } else {
+        fetch('/set_source', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        }).then(() => updateConnStatus());
+    }
+};
+function updateConnStatus() {
+    fetch('/get_source_status').then(r => r.json()).then(data => {
+        let badge = document.getElementById('conn-status');
+        let color = 'bg-secondary';
+        if (data.status === 'Connected') color = 'bg-success';
+        else if (data.status === 'Error') color = 'bg-danger';
+        else if (data.status === 'Connecting') color = 'bg-warning';
+        badge.className = 'badge ' + color;
+        badge.textContent = 'Status: ' + data.status;
+    });
+}
+setInterval(updateConnStatus, 2000);
+window.onload = function() {
+    fetch('/get_roi').then(r => r.json()).then(data => { roi = data.roi; drawROI(); });
+    fetch('/event_history').then(r => r.json()).then(data => updateEventLog(data.events));
+    resizeCanvas();
+    updateConnStatus();
+};
+</script>
+</body>
+</html> 

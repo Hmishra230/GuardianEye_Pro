@@ -1,0 +1,10 @@
+opencv-python
+numpy
+tk
+Flask
+Flask-SocketIO
+eventlet
+SQLAlchemy
+werkzeug
+ffmpeg-python 
+gunicorn
