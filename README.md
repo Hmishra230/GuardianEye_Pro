@@ -28,7 +28,7 @@ This system detects fast-moving thrown objects (such as sacks, stones, or tools)
    ```
 2. Run the application:
    ```bash
-   python main.py
+   python dashboard.py
    ```
 
 ## Usage
